@@ -11,14 +11,7 @@
 #define DEBUGLOGISP(...)
 #endif
 
-#define AVRISP_CFG_JSON   "/avrisp_cfg.json"
-
-typedef struct {
-    String   signature;
-    String   name;
-    uint32_t flash_size;
-    uint32_t page_size;
-} ChipConfigAvr_t;
+#include "submodule_isp_types.h"
 
 class Class_SubIsp : public Class_ProgBase {
 public:
