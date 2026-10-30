@@ -56,7 +56,7 @@
     <!-- Конфигурация проекта и информация о чипе -->
     <div class="content" style="text-align: center;">
         <form id="cfgForm" action="" method="post">
-            <table class="scan" style="width: auto; margin: 0 auto;">
+            <table class="global_table_style" style="width: auto; margin: 0 auto;">
                 <tr><th colspan="2">AVR Chip Info</th></tr>
                 <tr><td class="label">Programmer project name:</td><td><input type="text" id="projname" name="projname" value="" class="cfg-input"></td></tr>
                 <tr><td class="label">Chip memory size (bytes):</td><td><input type="text" id="chipsize" name="chipsize" value="" class="cfg-input"></td></tr>
@@ -75,7 +75,7 @@
 
     <!-- AVR Fuses -->
     <div class="content" style="text-align: center;">
-        <table class="scan" style="width: auto; margin: 0 auto;">
+        <table class="global_table_style" style="width: auto; margin: 0 auto;">
             <tr>
                 <th colspan="2">
                     AVR Chip Fuses
@@ -87,7 +87,7 @@
             </tr>
         </table>
 
-        <table id="fuse_bits" class="scan" style="width: auto; margin: 10px auto 0 auto; display: none;">
+        <table id="fuse_bits" class="global_table_style" style="width: auto; margin: 10px auto 0 auto; display: none;">
             <tr><td class="fuse-label">Fuse HIGH</td><td style="text-align: center;">0x <input type="text" id="avrfusehigh" name="ip_0" class="fuse-input"></td></tr>
             <tr><td class="fuse-label">Fuse LOW</td><td style="text-align: center;">0x <input type="text" id="avrfuselow" name="ip_1" class="fuse-input"></td></tr>
             <tr><td class="fuse-label">Fuse PROTECTION</td><td style="text-align: center;">0x <input type="text" id="avrfuseprot" name="ip_2" class="fuse-input"></td></tr>
