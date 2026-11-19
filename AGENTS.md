@@ -312,11 +312,13 @@ SWD-специфичных маршрутов нет — используютс�
 
 # Слоистая структура
 
-Из `../../LAYERS.md`: `module_prog` — общие cfg/filelist/md5/миграция; типы в `.h`,
-не-веб логика в `.cpp`; выделить `_types.h`, `_engine.cpp` (cfg/filelist/md5).
-`submodule_isp` — аппаратная часть уже в `prog_isp.*`; выделить `_types.h`, engine частично.
-`submodule_swd` — аппаратная часть в `swd.*`/`stm32f*_flash.*`; выделить `_types.h`, engine
-частично. Приоритет — низкий.
+Из `../../LAYERS.md`: `module_prog` — общие cfg/filelist/md5/миграция; типы в
+`module_prog_types.h`, не-веб логика в `module_prog_engine.cpp`.
+`submodule_isp` — аппаратная часть в `prog_isp.*`, типы в `submodule_isp_types.h`,
+engine-часть в `submodule_isp_engine.cpp`.
+`submodule_swd` — аппаратная часть в `swd.*`/`stm32f*_flash.*`, типы в
+`submodule_swd_types.h`, engine-часть в `submodule_swd_engine.cpp`.
+Выделение слоёв выполнено.
 
 # Критерии приёмки
 
