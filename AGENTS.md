@@ -427,6 +427,25 @@ shared `spark-md5.js` — из `core_ota`.
 Тестовые прошивки (мигание LED GPIO25) собираются `tools/rpico_test_fw/build_fw.py` и
 кладутся в `<ядро>/hex_bin/` как `pico_100ms.bin`, `pico_500ms.bin`, `pico_1s.bin`, `pico_2s.bin`.
 
+## Полное обновление ФС с сохранением пользовательских данных
+
+`pio run -e esp32-rpico -t uploadfs` перезаписывает образ ФС целиком (страницы модулей и
+дефолтные конфиги), но удаляет пользовательские файлы. Порядок (проверено 2026-11-20):
+
+1. Сохранить по одному файлу (`GET /fs/download?path=/...`): `config_wifi*.json`,
+   `secret.json`, `config_sys.json`, `config_ntp/time/prog/udp/state.json`,
+   `prog_filelist.json`, `rpico_cfg.json`, `/macros/*.lua`, `pico_*.bin`.
+2. Выполнить `pio run -e esp32-rpico -t uploadfs` (устройство перезагрузится). Wi-Fi берётся
+   из `config_wifi0.json` образа; в репозитории слот 0 содержит рабочую сеть, поэтому IP
+   сохраняется.
+3. Восстановить файлы: `POST /fs/upload?path=/...` с `Content-Type: application/octet-stream`.
+   Для макросов предварительно `POST /fs/mkdir?path=/macros` (ответ `409`, если каталог уже есть).
+4. Проверить `/fs/info` (поле `fsVersion`), `/prog/fileslist` и страницы фронта.
+
+> Если в образе слот 0 не содержит рабочей сети, после `uploadfs` устройство уйдёт в AP:
+> Wi-Fi восстанавливается через терминал (`wifi set 0 ssid <...>`, `wifi set 0 pass <...>`,
+> `wifi apply`) или страницу Wi-Fi в AP-режиме.
+
 # Слоистая структура
 
 Из `../../LAYERS.md`: `module_prog` — общие cfg/filelist/md5/миграция; типы в
@@ -465,6 +484,10 @@ engine-часть в `submodule_isp_engine.cpp`.
   из `hex_bin/`, проверка мигания LED GPIO25 и статуса `ok` в списке файлов.
   **Пройдено 2026-11-20:** все 4 прошивки прошиты и подтверждены пользователем
   (0.1/0.5/1/2 с), verify и reset работают; скорость 2.36 КБ/с при `RPICO_SWD_DELAY=2`.
+- Фронт после полного `uploadfs` (2026-11-20, `esp32-rpico`): 13 страниц, 8 ассетов и
+  13 API-эндпоинтов — все `200`; меню с второй колонкой (Programmer / Project config / UDP);
+  end-to-end `/prog/flash` для `pico_500ms.bin` — 100 %, status `ok`, 2.34 КБ/с;
+  Pico мигает ~0.5 с. Конфиги, макросы и прошивки после backup+restore сохранены.
 - Thumb-блоб: после `build_algo.py` проверить `objdump -d` — только 16-битные Thumb-инструкции
   (Cortex-M0+), без вызовов `__aeabi_*`.
 
