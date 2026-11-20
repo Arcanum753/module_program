@@ -412,6 +412,12 @@ shared `spark-md5.js` — из `core_ota`.
 1. Подключите Pico по SWD (CLK=G21, DATA=G19, GND, 3V3) и подайте питание.
 2. Прошейте ESP с env `esp32-rpico` (`pio run -e esp32-rpico -t upload`); ФС можно не
    обновлять: `/rpico_cfg.json` с дефолтом RP2040 создаётся при старте, если его нет.
+   **Если на устройстве старая ФС без страниц модуля**, второй колонки меню и `/prog.html`
+   не будет: загрузите `page_head.html`, `prog.html`, `project.html` (и `udp.html` при
+   `module_udp`) через `POST /fs/upload?path=/...` (raw body,
+   `Content-Type: application/octet-stream`) — Wi-Fi-конфиги сохранятся. Полный
+   `pio run -e esp32-rpico -t uploadfs` тоже обновит страницы, но сбросит Wi-Fi-конфиги,
+   `secret.json` и файлы прошивок на ФС.
 3. Откройте `/project.html`, укажите имя проекта и чип `RP2040`, нажмите **Save**.
 4. На `/prog.html` загрузите `.bin` (HEX не поддерживается), выделите файл и нажмите **Program**.
 5. Дождитесь 100%: прогресс идёт по секторам 4 КБ, затем выполняется verify и сброс Pico.
