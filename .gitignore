@@ -1,0 +1,3 @@
+tools/rp2040_algo/out/
+tools/rpico_test_fw/build/
+__pycache__/

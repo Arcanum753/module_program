@@ -1,0 +1,13 @@
+{
+  "chips": [
+    {
+      "idcode": "0x0bc12477",
+      "name": "RP2040",
+      "family": "rp2040",
+      "flash_size": 2097152,
+      "flash_start": "0x10000000",
+      "sector_size": 4096,
+      "page_size": 256
+    }
+  ]
+}

@@ -1,18 +1,19 @@
-# module_program — программатор AVR (ISP) и STM32 (SWD)
+# module_program — программатор AVR (ISP), STM32 (SWD) и RP2040 (SWD)
 
 > **Опциональный модуль.** Подключается через `src_filter` + `build_flags`.
 > **Работоспособен только в составе сборки, содержащей ядро** (см. `../../TRS.md` §2.1).
 
-Один git-репозиторий, включающий три компонента: общий контейнер `module_prog/`
-(`Class_ProgBase`), AVR ISP-субмодуль `submodule_isp/` (`Class_SubIsp`) и STM32 SWD-субмодуль
-`submodule_swd/` (`Class_SubSwd`). Все инструкции — общий контейнер, ISP-специфика,
-SWD-специфика и руководства пользователя обоими программаторами — собраны в этом файле.
+Один git-репозиторий, включающий четыре компонента: общий контейнер `module_prog/`
+(`Class_ProgBase`), AVR ISP-субмодуль `submodule_isp/` (`Class_SubIsp`), STM32 SWD-субмодуль
+`submodule_swd/` (`Class_SubSwd`) и RP2040 SWD-субмодуль `submodule_rpico/` (`Class_SubRpico`).
+Все инструкции — общий контейнер, специфика субмодулей и руководства пользователя —
+собраны в этом файле.
 
 - **Репозиторий:** https://github.com/Arcanum753/module_program
 - **Папка:** `src/module_program/`
-- **Флаг активации:** `-D PROGTYPE_ISP` или `-D PROGTYPE_SWD` (выбор субмодуля — через `src_filter`, а не через `#if PROGTYPE_*`)
-- **Registry:** `object=progIsp`, `define=PROGTYPE_ISP` (ISP) либо `object=progSwd`, `define=PROGTYPE_SWD` (SWD); `web=1`, `loop=0`; без `namespace`/`res`/`prio`
-- **Только для платформы:** обе; env — `esp32-isp` / `esp32-swd`
+- **Флаг активации:** `-D PROGTYPE_ISP`, `-D PROGTYPE_SWD` или `-D PROGTYPE_RPICO` (выбор субмодуля — через `src_filter`, а не через `#if PROGTYPE_*`)
+- **Registry:** `object=progIsp`, `define=PROGTYPE_ISP` (ISP) либо `object=progSwd`, `define=PROGTYPE_SWD` (SWD), либо `object=progRpico`, `define=PROGTYPE_RPICO` (RP2040); `web=1`, `loop=0`; без `namespace`/`res`/`prio`
+- **Только для платформы:** обе; env — `esp32-isp` / `esp32-swd` / `esp32-rpico` (RP2040 — только ESP32)
 - **Зависит от модулей:** —
 - **Зависит от ядра:** `core_web`, `core_sys`, `core_json`, `core_ntp`, `core_led`, `core_state`
 
@@ -23,6 +24,7 @@ SWD-специфика и руководства пользователя обо
 | `module_prog` | `src/module_program/module_prog/` | `Class_ProgBase` (абстрактный), объекта нет | общая база: проектная конфигурация, список файлов, загрузка в FS, диск, статус чипа |
 | `submodule_isp` | `src/module_program/submodule_isp/` | `Class_SubIsp : public Class_ProgBase`, `progIsp` | программирование AVR по ISP |
 | `submodule_swd` | `src/module_program/submodule_swd/` | `Class_SubSwd : public Class_ProgBase`, `progSwd` | программирование STM32 по SWD |
+| `submodule_rpico` | `src/module_program/submodule_rpico/` | `Class_SubRpico : public Class_ProgBase`, `progRpico` | программирование RP2040 (Raspberry Pi Pico) по SWD через ROM-функции bootrom |
 
 # module_prog — база программатора
 
@@ -145,7 +147,96 @@ IDCODE, mass-erase + program + reset. Обёртка над `ESP_PROGSWD swdprog
 - STM32F1 (протестировано)
 - STM32F4 (протестировано)
 
-# Веб-интерфейс (общий для ISP и SWD)
+# submodule_rpico — программатор RP2040 SWD
+
+**Каталог:** `src/module_program/submodule_rpico/` · **Класс:** `Class_SubRpico : public Class_ProgBase` · **Объект:** `progRpico`
+**`[registry]`:** `object=progRpico`, `define=PROGTYPE_RPICO`, `web=1`, `loop=0`.
+**Платформа:** только ESP32 (env `esp32-rpico`).
+
+**Назначение:** программирование flash Raspberry Pi Pico (RP2040) по SWD из файловой
+системы. Внешняя QSPI-flash у RP2040 не имеет регистров записи, поэтому стирание/запись
+выполняются ROM-функциями bootrom (`connect_internal_flash`, `flash_exit_xip`,
+`flash_range_erase`, `flash_range_program`, `flash_flush_cache`, `flash_enter_cmd_xip`),
+которые запускаются на самом RP2040 небольшим Thumb-блобом из SRAM.
+
+## Функциональные требования (RP2040)
+
+- FR-RPICO-1: Читать DPIDR (`rp_swd_init`), ожидать `0x0BC12477` (RP2040); иначе — `CHIP_OFFLINE`.
+- FR-RPICO-2: Находить чип в `/rpico_cfg.json` по `idcode`; при отсутствии файла — встроенный дефолт RP2040.
+- FR-RPICO-3: Сверять чип с `chip_name` из `/config_prog.json` (`423` при несовпадении).
+- FR-RPICO-4: halt ядра, отключение IRQ (NVIC ICER), power-up DP, загрузка блоба в SRAM,
+  резолв 6 ROM-функций через `rom_table_lookup`.
+- FR-RPICO-5: Прошивать `.bin`/`.binary` кооперативно (EERTOS), чанками по 4096 Б:
+  `flash_range_erase` (4-КБ сектор, `0x20`) + `flash_range_program` (страницы по 256 Б,
+  хвост дополняется `0xFF`), с прогрессом и скоростью.
+- FR-RPICO-6: Проверять записанное чтением через XIP (`0x10000000 + offset`) и сравнением с файлом.
+- FR-RPICO-7: Сбрасывать цель `AIRCR.SYSRESETREQ` (fallback — `WATCHDOG_CTRL.TRIGGER`),
+  записывать статус в `prog_filelist.json` как в SWD.
+- FR-RPICO-8: Значения по умолчанию: `flash_start=0x10000000`, `flash_size=2097152`,
+  `sector_size=4096`, `page_size=256`.
+- FR-RPICO-9: Выводы по умолчанию: `SWDPIN_CLK=21`, `SWDPIN_DATA=19` (как у SWD).
+- FR-RPICO-10: RP2350 не поддерживается (другие ROM-функции/QMI).
+
+## Подключение RP2040 (Raspberry Pi Pico). Распиновка
+
+> [!WARNING]
+> **ВНИМАНИЕ! ESP И RP2040 ДОЛЖНЫ БЫТЬ СОГЛАСОВАНЫ ПО УРОВНЮ НАПРЯЖЕНИЯ ПИТАНИЯ.**
+> Не подключайте USB Pico одновременно с питанием 3.3V от ESP32.
+
+| ESP32 | Pico (debug header) |
+|:-----|:--------------------|
+| G21   | SWCLK               |
+| G19   | SWDIO               |
+| GND   | GND                 |
+| +3.3V | 3V3                 |
+| G22   | RUN (pin 30)        |
+
+RST (RUN) опционален: если задан `RPICO_RST_PIN` (в env `esp32-rpico` — GPIO22),
+он используется как резерв при отсутствии ответа SWD (и в диагностике `/rpico/diag?rst`).
+Перед обычным подключением сброс **не** выполняется: после RUN-reset debug-порт RP2040
+некоторое время не отвечает. После прошивки цель перезапускается `AIRCR.SYSRESETREQ`
+(fallback — watchdog).
+
+Пины SWD настраиваются через `build_flags`:
+```
+-D SWDPIN_CLK=21
+-D SWDPIN_DATA=19
+-D RPICO_RST_PIN=22   # -1 = не использовать
+-D RPICO_SWD_DELAY=2  # мкс на полутакт; 2 проверено на HIL (~2.4 КБ/с)
+```
+
+### Особенности RP2040 (SWDv2 multi-drop) — проверено на HIL
+
+- RP2040 — **DPv2**: после line reset обязательна запись `TARGETSEL` (`0x01002927`, core 0)
+  специальной последовательностью **8 out + 5 in (Trn+ACK+Trn) + 33 out (data+parity)**
+  (как в OpenOCD `cmsis_dap_metacmd_targetsel`). Без TARGETSEL DPIDR читается, но AP
+  недоступен (ACK=FAULT/7).
+- Если DP в dormant — перед line reset нужна последовательность **Dormant-to-SWD**
+  (8 high + 128-битный selection alert + activation `0x1a`, см. OpenOCD `swd_seq_dormant_to_swd`).
+- **`DP_SELECT` (0x08) только пишется.** Чтение 0x08 на DPv2 — это `RESEND`, оно не
+  отвечает (ACK=7) и срывает протокол.
+- **`AP_IDR` (0xFC) читается только при `APBANKSEL=0xF`**; иначе AP возвращает FAULT,
+  выставляется `STICKYERR` и все последующие AP-доступы падают. Перед доступом к AP
+  полезно очищать ошибки записью `DP_ABORT=0x1E`.
+- Блоб исполняется из SRAM (`0x20000200`), PC пишется чётным адресом (Thumb на M0+ всегда).
+- ROM-функции на стенде: IF=0x2490, EX=0x23E4, RE=0x236C, RP=0x23B4, FC=0x2350, CX=0x2320.
+
+Диагностика bring-up (под auth): `GET /rpico/diag?levels=1` — уровни SWCLK/SWDIO
+(включая «плавающий» тест подтяжек цели); `GET /rpico/diag?rst=<ms>` — удержать RUN
+в низком уровне; `/rpico/diag?probe=1` — матрица (пины × turnaround); `/rpico/diag?halt=1`
+— проверка DHCSR; `/rpico/diag?steps=1` — пошаговый AP-доступ; `/rpico/diag?ap=1` — AP с/без TARGETSEL.
+
+## Тестовые прошивки и Thumb-блоб
+
+- `tools/rpico_test_fw/` — CMake-проект (pico-sdk) с 4 целями мигания LED GPIO25
+  (100/500/1000/2000 мс) и `build_fw.py`; результат кладётся в `<ядро>/hex_bin/pico_*.bin`.
+- `tools/rp2040_algo/` — исходник Thumb-блоба (`rp2040_algo.s`) и `build_algo.py`,
+  который генерирует `submodule_rpico/rp2040_algo.h` (блоб коммитится вместе с
+  заголовком; пересборка — только при изменении `.s`). Раскладка SRAM:
+  блоб `0x20000200`, params `0x20000400`, lookup params `0x20000480`,
+  буфер данных `0x20001000`, стек `0x20040000`.
+
+# Веб-интерфейс (общий для ISP, SWD и RP2040)
 
 Общие маршруты: `/prog/diskinfo`, `/prog/fileslist`, `/prog/delete`, `POST /prog/uploadfile`,
 `/prog/uploadstat`, `/prog/setmd5`, `/prog/uploadsize`, `/prog/progress`, `/prog/flash`,
@@ -155,20 +246,21 @@ IDCODE, mass-erase + program + reset. Обёртка над `ESP_PROGSWD swdprog
 ISP-специфичные маршруты: `GET /avr/fuseread`, `POST /avr/fusewrite`, `/avr/info`,
 `POST /avr/save`, `GET /avr/readsignature`, `GET /avrcfg`.
 
-SWD-специфичных маршрутов нет — используются только общие маршруты `module_prog`.
+SWD- и RP2040-специфичных маршрутов нет — используются только общие маршруты `module_prog`.
 
 Веб-файлы: `_menu.html`, `prog.html`, `project.html`, `avrcfg.html`, `config_prog.json`,
-`avrisp_cfg.json`, `swd_cfg.json`, `avrisp.json` (устаревший); shared `spark-md5.js` —
-из `core_ota`.
+`avrisp_cfg.json`, `swd_cfg.json`, `rpico_cfg.json`, `avrisp.json` (устаревший);
+shared `spark-md5.js` — из `core_ota`.
 
 # Конфигурация
 
 | Файл | Владелец | Основные поля |
 |------|----------|---------------|
-| `/config_prog.json` | `module_prog` | `project`, `chip_name` (один файл для ISP и SWD) |
+| `/config_prog.json` | `module_prog` | `project`, `chip_name` (один файл для ISP, SWD и RP2040) |
 | `/prog_filelist.json` | `module_prog` | `filename`, `upload_date`, `md5`, `prog_date`, `prog_status`, `prog_time`, `prog_error`, `prog_error_stage`, `prog_error_percent`, `prog_speed` |
 | `/avrisp_cfg.json` | `submodule_isp` | `chips[]`: `signature`, `name`, `flash_size`, `page_size` |
 | `/swd_cfg.json` | `submodule_swd` | `chips[]`: `idcode`, `name`, `family`, `flash_size`, `flash_start`, `page_size`, `word_size`, `csw_value` |
+| `/rpico_cfg.json` | `submodule_rpico` | `chips[]`: `idcode`, `name`, `family`, `flash_size`, `flash_start`, `sector_size`, `page_size` |
 
 `config_prog_isp.json` / `config_prog_swd.json` — устаревшие имена, мигрируются при старте.
 
@@ -178,6 +270,7 @@ SWD-специфичных маршрутов нет — используютс�
 |-----------|-----------|---------------------|
 | AVR ISP | MISO/MOSI/SCK/RST | 19 / 23 / 18 / 5 |
 | STM32 SWD | CLK/DATA | 21 / 19 |
+| RP2040 SWD | CLK/DATA | 21 / 19 |
 
 # Руководство пользователя AVR-ISP программатора
 
@@ -310,6 +403,24 @@ SWD-специфичных маршрутов нет — используютс�
 
 Автоматического отката нет. Если новая прошивка работает некорректно, выделите в таблице ранее загруженный файл и нажмите **Program** — он будет прошит как обычный файл.
 
+# Руководство пользователя RP2040 (Pico) программатора
+
+> [!WARNING]
+> **Не отключайте питание ESP и Pico во время прошивки.** Прерывание стирания/записи
+> оставит Pico с частично затёртой flash; восстановление — BOOTSEL + USB с ПК.
+
+1. Подключите Pico по SWD (CLK=G21, DATA=G19, GND, 3V3) и подайте питание.
+2. Прошейте ESP с env `esp32-rpico` (`pio run -e esp32-rpico -t upload`); ФС можно не
+   обновлять: `/rpico_cfg.json` с дефолтом RP2040 создаётся при старте, если его нет.
+3. Откройте `/project.html`, укажите имя проекта и чип `RP2040`, нажмите **Save**.
+4. На `/prog.html` загрузите `.bin` (HEX не поддерживается), выделите файл и нажмите **Program**.
+5. Дождитесь 100%: прогресс идёт по секторам 4 КБ, затем выполняется verify и сброс Pico.
+6. Pico перезапустится и начнёт выполнять новую прошивку; в таблице файлов появится статус
+   `ok`, время и скорость.
+
+Тестовые прошивки (мигание LED GPIO25) собираются `tools/rpico_test_fw/build_fw.py` и
+кладутся в `<ядро>/hex_bin/` как `pico_100ms.bin`, `pico_500ms.bin`, `pico_1s.bin`, `pico_2s.bin`.
+
 # Слоистая структура
 
 Из `../../LAYERS.md`: `module_prog` — общие cfg/filelist/md5/миграция; типы в
@@ -318,12 +429,16 @@ SWD-специфичных маршрутов нет — используютс�
 engine-часть в `submodule_isp_engine.cpp`.
 `submodule_swd` — аппаратная часть в `swd.*`/`stm32f*_flash.*`, типы в
 `submodule_swd_types.h`, engine-часть в `submodule_swd_engine.cpp`.
+`submodule_rpico` — bit-bang PHY в `rp_sw.*`, низкий уровень RP2040 в `rp2040_swd.*`,
+автомат прошивки в `prog_rpico.*`, типы в `submodule_rpico_types.h`, engine-часть в
+`submodule_rpico_engine.cpp`; исполняемый на цели блоб — `rp2040_algo.h` (генерируется).
 Выделение слоёв выполнено.
 
 # Критерии приёмки
 
 - AC-7: AVR ISP: чтение сигнатуры/фьюзов, прошивка HEX/BIN, верификация, прогресс; при неверном чипе — ошибка без повреждения конфига.
 - AC-8: STM32 SWD: чтение IDCODE, определение чипа, mass-erase + прошивка + reset; алгоритмы F1/F4 выбираются верно.
+- AC-9: RP2040 SWD: DPIDR `0x0BC12477`, резолв ROM-функций, прошивка `.bin` + verify, программный reset; Pico мигает с заданным периодом.
 
 # Ограничения и известные проблемы
 
@@ -340,6 +455,12 @@ engine-часть в `submodule_isp_engine.cpp`.
   JSON-базах (см. `../../TESTING.md`).
 - HIL-стенд (уровень 5): реальный ATmega328P/STM32F103, прошивка эталонного HEX,
   верификация, чтение fuses/IDCODE, проверка `CHIP_MISMATCH` (см. `../../TESTING.md`).
+- RP2040 (HIL): Pico, прошивка `pico_100ms.bin`/`pico_500ms.bin`/`pico_1s.bin`/`pico_2s.bin`
+  из `hex_bin/`, проверка мигания LED GPIO25 и статуса `ok` в списке файлов.
+  **Пройдено 2026-11-20:** все 4 прошивки прошиты и подтверждены пользователем
+  (0.1/0.5/1/2 с), verify и reset работают; скорость 2.36 КБ/с при `RPICO_SWD_DELAY=2`.
+- Thumb-блоб: после `build_algo.py` проверить `objdump -d` — только 16-битные Thumb-инструкции
+  (Cortex-M0+), без вызовов `__aeabi_*`.
 
 # Ссылки
 
